@@ -51,5 +51,7 @@ def test_only_recent_minute_counts():
 
 def test_score_history_per_minute_for_report():
     m = FocusMeter(window=60, look_away=1.0, penalty=10)
-    feed(m, [(True, 60), (True, 18), (False, 2)] * 1 + [(True, 18), (False, 2)] * 2)
-    assert m.history == [100, 60]
+    # 첫 1분은 집중, 둘째 1분은 3번 딴 데 봄. 2분이 '지나야' 둘째 점수가 기록된다.
+    feed(m, [(True, 60)] + [(True, 18), (False, 2)] * 3 + [(True, 0.5)])
+    assert len(m.history) == 2
+    assert m.history[0] == 100 and 55 <= m.history[1] <= 65
