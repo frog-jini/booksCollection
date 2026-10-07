@@ -6,3 +6,6 @@ models/
 books/
 *.egg-info/
 reports/
+ios/**/.build/
+ios/**/.swiftpm/
+ios/*.xcodeproj/

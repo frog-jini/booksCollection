@@ -2,7 +2,7 @@ import Testing
 @testable import EyeReaderKit
 
 /// 글자당 10pt 고정폭 — UIKit 없이 테스트
-let measure: (String) -> Double = { Double($0.count) * 10 }
+let measure: @Sendable (String) -> Double = { Double($0.count) * 10 }
 
 func pages(_ text: String, width: Double = 200, height: Double = 100,
            origin: Point = Point(x: 0, y: 0)) -> [Page] {
