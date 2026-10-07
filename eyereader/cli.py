@@ -29,9 +29,16 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--font-size", type=int, default=30)
     p.add_argument("--window", type=_window, metavar="WxH", help="창 크기 (기본: 전체 화면)")
     p.add_argument("--reuse-calibration", action="store_true", help="지난 보정값 재사용")
+    coach = p.add_argument_group("독서 도우미(자세·휴식·졸음·집중도)")
+    coach.add_argument("--monitor", action="store_true",
+                       help="책 없이 카메라만 켜서, 다른 앱(리디·Kindle·브라우저 등)으로 읽는 동안 알림")
+    coach.add_argument("--camera-fov", type=float, default=60.0, help="웹캠 가로 화각(도). 거리 계산에 씀")
+    coach.add_argument("--min-distance", type=float, default=40.0, help="이보다 가까우면 알림(cm)")
+    coach.add_argument("--break-minutes", type=float, default=40.0, help="이만큼 계속 읽으면 휴식 권유(분)")
+    coach.add_argument("--reports-dir", default="reports", help="독서 보고서 저장 위치")
     args = p.parse_args(argv)
-    if not (args.book or args.search or args.gutenberg):
-        p.error("책 파일 경로, --search 또는 --gutenberg 중 하나가 필요합니다")
+    if not (args.book or args.search or args.gutenberg or args.monitor):
+        p.error("책 파일 경로, --search, --gutenberg, --monitor 중 하나가 필요합니다")
     return args
 
 

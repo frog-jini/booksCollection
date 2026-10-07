@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 from .features import eye_feature
@@ -14,6 +15,14 @@ MODEL_URL = (
 MODEL_PATH = Path.home() / ".cache" / "eyereader" / "face_landmarker.task"
 
 
+@dataclass
+class FaceFrame:
+    """카메라 한 장면의 얼굴 랜드마크(정규화 x/폭, y/높이). 얼굴이 없으면 landmarks=None."""
+
+    landmarks: list | None
+    aspect: float  # 이미지 가로/세로
+
+
 def ensure_model(path: Path = MODEL_PATH) -> Path:
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -23,7 +32,7 @@ def ensure_model(path: Path = MODEL_PATH) -> Path:
 
 
 class WebcamSource:
-    """웹캠 프레임마다 시선 특징 벡터(보정 전)를 돌려준다."""
+    """웹캠 프레임마다 얼굴 랜드마크(read_frame)와 시선 특징 벡터(read_feature, 보정 전)를 돌려준다."""
 
     needs_calibration = True
 
@@ -44,17 +53,21 @@ class WebcamSource:
         self.landmarker = vision.FaceLandmarker.create_from_options(options)
         self._ts = 0
 
-    def read_feature(self):
+    def read_frame(self) -> FaceFrame | None:
         ok, frame = self.cap.read()
         if not ok:
             return None
+        h, w = frame.shape[:2]
         rgb = self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
         image = self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)
         self._ts += 33
         result = self.landmarker.detect_for_video(image, self._ts)
-        if not result.face_landmarks:
-            return None
-        return eye_feature([(p.x, p.y) for p in result.face_landmarks[0]])
+        landmarks = [(p.x, p.y) for p in result.face_landmarks[0]] if result.face_landmarks else None
+        return FaceFrame(landmarks, w / h)
+
+    def read_feature(self):
+        frame = self.read_frame()
+        return eye_feature(frame.landmarks) if frame is not None else None
 
     def close(self):
         self.cap.release()
