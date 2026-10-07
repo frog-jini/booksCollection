@@ -8,6 +8,7 @@ dependencies = [
     "ebooklib",
     "beautifulsoup4",
     "numpy",
+    "requests",
 ]
 
 [project.optional-dependencies]
