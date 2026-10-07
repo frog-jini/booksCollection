@@ -93,3 +93,19 @@ func readPage(_ s: ReadingSession, from start: Double = 0) -> Double {
     #expect(BookText.stripGutenberg("plain") == "plain")
     #expect(Book(title: "x", rawText: raw).text == "Body.")
 }
+
+// --- 일본어·중국어 문단 정리 ---
+
+@Test func wrappedJapaneseLinesJoinWithoutSpacesAndIndentedLinesStartParagraphs() {
+    let raw = "\u{3000}或日の暮方の事である。一人の下人が、羅生\n門の下で雨やみを待っていた。\n「何をしていた。」\n\u{3000}次の段落。\n"
+    #expect(BookText.normalize(raw) ==
+            "或日の暮方の事である。一人の下人が、羅生門の下で雨やみを待っていた。\n\n「何をしていた。」\n\n次の段落。")
+}
+
+@Test func chineseWrappedLinesJoinWithoutSpaces() {
+    #expect(BookText.normalize("我们在图书馆\n里读书。\n\n第二段。") == "我们在图书馆里读书。\n\n第二段。")
+}
+
+@Test func koreanAndEnglishStillJoinWithSpaces() {
+    #expect(BookText.normalize("첫 줄\n이어짐\n\n둘째") == "첫 줄 이어짐\n\n둘째")
+}
