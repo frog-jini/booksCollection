@@ -67,3 +67,20 @@ def test_gutenberg_failure_exits_with_message():
 def test_no_book_source_is_an_error():
     with pytest.raises(SystemExit):
         parse_args([])
+
+
+# --- 감시 모드와 독서 도우미 옵션 (readme 11) ------------------------------------
+
+def test_monitor_mode_needs_no_book():
+    a = parse_args(["--monitor"])
+    assert a.monitor and a.book is None
+
+
+def test_reading_coach_options_have_sensible_defaults():
+    a = parse_args(["b.txt"])
+    assert (a.camera_fov, a.min_distance, a.break_minutes, a.reports_dir) == (60.0, 40.0, 40.0, "reports")
+
+
+def test_reading_coach_options_can_be_changed():
+    a = parse_args(["--monitor", "--camera-fov", "70", "--min-distance", "35", "--break-minutes", "38"])
+    assert (a.camera_fov, a.min_distance, a.break_minutes) == (70.0, 35.0, 38.0)
