@@ -3,7 +3,11 @@ name = "eyereader"
 version = "0.1.0"
 description = "눈동자 추적으로 읽는 위치를 표시하고 자동으로 페이지를 넘기는 책 리더"
 requires-python = ">=3.10,<3.13"
-dependencies = []
+dependencies = [
+    "pypdf",
+    "ebooklib",
+    "beautifulsoup4",
+]
 
 [project.optional-dependencies]
 dev = ["pytest"]
