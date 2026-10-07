@@ -16,14 +16,22 @@ def at(session, line, word):
     return (w.cx, w.cy)
 
 
+FRAME = 1 / 30  # 웹캠은 초당 약 30번 시선을 보낸다
+
+
+def look(session, point, t, seconds=0.3):
+    for _ in range(round(seconds / FRAME)):
+        session.step(point, t)
+        t += FRAME
+    return t
+
+
 def read_page(session, t=0.0):
     """사람처럼 한 페이지를 읽는다: 줄마다 처음→끝, 그리고 다음 줄 처음으로."""
     for line in range(len(session.page.lines)):
         for word in range(4):
-            session.step(at(session, line, word), t)
-            t += 0.3
-    session.step(at(session, 0, 0), t)  # 다음 페이지 첫 줄로 가려는 눈
-    return t + 0.3
+            t = look(session, at(session, line, word), t)
+    return look(session, at(session, 0, 0), t)  # 다음 페이지 첫 줄로 가려는 눈
 
 
 def test_starts_on_first_page_and_highlights_word_under_gaze():
@@ -38,7 +46,7 @@ def test_reading_to_end_of_page_turns_to_next_page_automatically():
     s = ReadingSession(pages())
     read_page(s)
     assert s.page_no == 1
-    assert s.tracker.word is None  # 새 페이지는 처음부터
+    assert s.tracker.word.text == "w08x"  # 새 페이지 첫 단어부터 이어서 읽는다
 
 
 def test_never_turns_past_last_page():
