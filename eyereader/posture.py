@@ -11,7 +11,10 @@
 from __future__ import annotations
 
 import math
+import statistics
 from dataclasses import dataclass
+
+from .alerts import Alert, Persistence
 
 LEFT_IRIS, RIGHT_IRIS, NOSE_TIP = 468, 473, 1
 NUM_LANDMARKS = 478
@@ -64,3 +67,50 @@ def head_pose(landmarks, aspect: float = 16 / 9, hfov_deg: float = DEFAULT_HFOV)
         pitch=math.degrees(pitch_rad),
         roll=roll,
     )
+
+
+POSTURE_TITLE = "독서 자세가 좋지 않습니다."
+
+
+class PostureMonitor:
+    """나쁜 자세가 hold 초 넘게 이어지면 알린다.
+
+    고개 숙임은 카메라 위치에 따라 '정상'이 사람마다 달라서, 처음 baseline_samples 개
+    자세의 중간값을 그 사람의 평소 자세로 삼고 그보다 max_head_down 도 넘게 숙이면 알린다.
+    """
+
+    def __init__(self, min_distance=40.0, max_roll=15.0, max_yaw=25.0, max_head_down=20.0,
+                 hold=10.0, cooldown=300.0, baseline_samples=30):
+        self.min_distance = min_distance
+        self.max_roll = max_roll
+        self.max_yaw = max_yaw
+        self.max_head_down = max_head_down
+        self.baseline_samples = baseline_samples
+        self.baseline_pitch: float | None = None
+        self._pitches: list[float] = []
+        self._gate = Persistence(hold, cooldown)
+
+    def _learn_baseline(self, pose: HeadPose):
+        if self.baseline_pitch is None:
+            self._pitches.append(pose.pitch)
+            if len(self._pitches) >= self.baseline_samples:
+                self.baseline_pitch = statistics.median(self._pitches)
+
+    def problems(self, pose: HeadPose) -> dict[str, tuple[bool, str]]:
+        head_down = self.baseline_pitch is not None and pose.pitch - self.baseline_pitch > self.max_head_down
+        return {
+            "too_close": (pose.distance_cm < self.min_distance,
+                          f"화면과 얼굴이 너무 가깝습니다. (약 {pose.distance_cm:.0f}cm)"),
+            "tilted": (abs(pose.roll) > self.max_roll, "고개가 한쪽으로 기울어져 있습니다."),
+            "turned": (abs(pose.yaw) > self.max_yaw, "화면을 비스듬히 보고 있습니다. 화면 정면에 앉아 주세요."),
+            "head_down": (head_down, "고개를 너무 숙이고 있습니다."),
+        }
+
+    def update(self, pose: HeadPose | None, t: float) -> list[Alert]:
+        if pose is None:
+            self._gate.clear()
+            return []
+        self._learn_baseline(pose)
+        return [Alert(kind, POSTURE_TITLE, message)
+                for kind, (active, message) in self.problems(pose).items()
+                if self._gate.check(kind, active, t)]

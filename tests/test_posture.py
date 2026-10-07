@@ -3,7 +3,7 @@ import math
 import pytest
 
 from eyereader.posture import (
-    AVG_IPD_CM, LEFT_IRIS, NOSE_TIP, RIGHT_IRIS, head_pose,
+    AVG_IPD_CM, LEFT_IRIS, NOSE_TIP, RIGHT_IRIS, HeadPose, PostureMonitor, head_pose,
 )
 
 # 얼굴 모형(대략적인 평균값): 코끝은 눈 높이에서 4cm 아래, 3cm 앞에 있다.
@@ -93,8 +93,6 @@ def test_no_face_gives_none():
 
 
 # --- 12. 나쁜 자세가 이어지면 알려 주기 ------------------------------------------
-
-from eyereader.posture import HeadPose, PostureMonitor  # noqa: E402
 
 GOOD = HeadPose(distance_cm=55, yaw=0, pitch=0, roll=0)
 
