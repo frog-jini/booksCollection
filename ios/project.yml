@@ -1,0 +1,35 @@
+# Xcode 프로젝트 설정. 맥에서 `xcodegen` 을 실행하면 EyeReader.xcodeproj 가 만들어진다.
+name: EyeReader
+options:
+  bundleIdPrefix: com.jini
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  EyeReaderKit:
+    path: EyeReaderKit
+targets:
+  EyeReader:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+    dependencies:
+      - package: EyeReaderKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: 눈으로 읽기
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSCameraUsageDescription: 눈동자와 얼굴 자세를 인식해 읽는 위치를 표시하고 자세·휴식·졸음을 알려 드리기 위해 Face ID 카메라를 사용합니다. 영상은 기기 밖으로 보내지 않습니다.
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities: [arkit]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jini.eyereader
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_STYLE: Automatic
