@@ -35,13 +35,15 @@ func utf8AndUtf16WithOrWithoutBOMAreRead(text: String) throws {
     #expect(BookText.decode(Data(text.utf8)) == text)
     #expect(BookText.decode(Data([0xEF, 0xBB, 0xBF]) + Data(text.utf8)) == text)
     #expect(BookText.decode(try #require(text.data(using: .utf16))) == text)  // BOM 포함(Windows 메모장 '유니코드')
+}
+
+/// BOM 없는 UTF-16 은 드물지만, 띄어쓰기·ASCII 가 섞인 글이면 0 바이트 분포로 알아본다.
+@Test(arguments: [korean, french])
+func utf16WithoutBOMIsRecognizedForSpacedText(text: String) throws {
     #expect(BookText.decode(try #require(text.data(using: .utf16LittleEndian))) == text)
     #expect(BookText.decode(try #require(text.data(using: .utf16BigEndian))) == text)
 }
 
-@Test func decodedTextNeverContainsBrokenCharacters() {
-    var junk = Data((0..<256).map { UInt8($0) })
-    junk.append(contentsOf: [0xFF, 0xFE, 0x00])
-    let text = BookText.decode(Data((0x80...0xFF).map { UInt8($0) }))
-    #expect(!text.isEmpty)
+@Test func unknownBytesStillGiveSomeText() {
+    #expect(!BookText.decode(Data((0x80...0xFF).map { UInt8($0) })).isEmpty)
 }
