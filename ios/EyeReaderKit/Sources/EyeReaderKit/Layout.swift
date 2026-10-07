@@ -5,6 +5,7 @@ public struct Word: Equatable, Sendable {
     public let text: String
     public let index: Int  // 책 전체에서의 단어 순번
     public let frame: Rect
+    public var spaceBefore = true  // 앞 단어와 띄어 쓰는가(일본어·중국어 글자 사이는 false)
     public var center: Point { frame.center }
 }
 
@@ -16,25 +17,95 @@ public struct Line: Equatable, Sendable {
 public struct Page: Equatable, Sendable {
     public var lines: [Line] = []
     public var words: [Word] { lines.flatMap(\.words) }
-    public var text: String { lines.map { $0.words.map(\.text).joined(separator: " ") }.joined(separator: "\n") }
+    public var text: String { lines.map { joinWords($0.words) }.joined(separator: "\n") }
+}
+
+func joinWords(_ words: [Word]) -> String {
+    var out = ""
+    for w in words { out += (out.isEmpty || !w.spaceBefore ? "" : " ") + w.text }
+    return out
+}
+
+/// 배치할 낱말 하나. 일본어·중국어는 글자 하나하나가 낱말이고, 사이에 공백을 넣지 않는다.
+struct Token: Equatable {
+    var text: String
+    var spaceBefore: Bool
+}
+
+enum Script {
+    static func isCJK(_ c: Character) -> Bool {
+        c.unicodeScalars.contains { s in
+            switch s.value {
+            case 0x3040...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF, 0x3000...0x303F, 0xFF00...0xFFEF: true
+            default: false
+            }
+        }
+    }
+    static let closing: Set<Character> = ["。", "、", "，", "．", "！", "？", "」", "』", "）", "〕", "】", "》", "〉", "”", "’", "・", "ー", "…",
+                                          ",", ".", "!", "?", ")", ":", ";"]
+    static let opening: Set<Character> = ["「", "『", "（", "〔", "【", "《", "〈", "“", "‘", "("]
+}
+
+/// 한 줄을 낱말로 나눈다. 띄어쓰기 언어는 공백 기준, 일본어·중국어는 글자 단위(문장부호는 붙여서).
+func tokenize(_ line: Substring) -> [Token] {
+    var tokens: [Token] = []
+    for chunk in line.split(whereSeparator: \.isWhitespace) {
+        guard chunk.contains(where: Script.isCJK) else {
+            tokens.append(Token(text: String(chunk), spaceBefore: true))
+            continue
+        }
+        var units: [String] = []
+        var pendingOpen = ""
+        for c in chunk {
+            if Script.closing.contains(c), !units.isEmpty {
+                units[units.count - 1].append(c)  // 닫는 부호는 앞 글자에 붙여 줄 맨 앞에 오지 않게
+            } else if Script.opening.contains(c) {
+                pendingOpen.append(c)  // 여는 부호는 다음 글자에 붙인다
+            } else if !Script.isCJK(c), let last = units.last?.last, !Script.isCJK(last), pendingOpen.isEmpty {
+                units[units.count - 1].append(c)  // 한자 사이의 영문·숫자는 한 덩어리
+            } else {
+                units.append(pendingOpen + String(c))
+                pendingOpen = ""
+            }
+        }
+        if !pendingOpen.isEmpty { units.append(pendingOpen) }
+        tokens += units.enumerated().map { Token(text: $1, spaceBefore: $0 == 0) }
+    }
+    return tokens
+}
+
+/// 폭보다 긴 낱말은 글자 단위로 잘라 여러 조각으로 만든다(화면 밖으로 나가지 않게).
+func breakLong(_ token: Token, width: Double, measure: (String) -> Double) -> [Token] {
+    guard measure(token.text) > width, token.text.count > 1 else { return [token] }
+    var pieces: [Token] = []
+    var current = ""
+    for c in token.text {
+        if !current.isEmpty && measure(current + String(c)) > width {
+            pieces.append(Token(text: current, spaceBefore: pieces.isEmpty ? token.spaceBefore : false))
+            current = ""
+        }
+        current.append(c)
+    }
+    pieces.append(Token(text: current, spaceBefore: pieces.isEmpty ? token.spaceBefore : false))
+    return pieces
 }
 
 /// 원문 줄을 폭에 맞게 접는다. 빈 배열은 문단 사이 빈 줄.
-func wrap(_ text: String, width: Double, measure: (String) -> Double, spaceWidth: Double) -> [[String]] {
-    var rows: [[String]] = []
+func wrap(_ text: String, width: Double, measure: (String) -> Double, spaceWidth: Double) -> [[Token]] {
+    var rows: [[Token]] = []
     for srcLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
-        var row: [String] = []
+        var row: [Token] = []
         var used = 0.0
-        for word in srcLine.split(whereSeparator: \.isWhitespace).map(String.init) {
-            let w = measure(word)
-            let needed = row.isEmpty ? w : used + spaceWidth + w
-            if !row.isEmpty && needed > width {
+        for token in tokenize(srcLine).flatMap({ breakLong($0, width: width, measure: measure) }) {
+            let w = measure(token.text)
+            let gap = token.spaceBefore ? spaceWidth : 0
+            if !row.isEmpty && used + gap + w > width {
                 rows.append(row)
-                row = [word]
+                row = [token]
                 used = w
             } else {
-                row.append(word)
-                used = needed
+                used += (row.isEmpty ? 0 : gap) + w
+                row.append(token)
             }
         }
         rows.append(row)
@@ -53,11 +124,13 @@ public func paginate(_ text: String, width: Double, height: Double, measure: (St
         let y = origin.y + Double(pages[pages.count - 1].lines.count) * lineHeight
         var line = Line(y: y)
         var x = origin.x
-        for word in row {
-            let w = measure(word)
-            line.words.append(Word(text: word, index: index, frame: Rect(x: x, y: y, width: w, height: lineHeight)))
+        for (i, token) in row.enumerated() {
+            if i > 0 && token.spaceBefore { x += spaceWidth }
+            let w = measure(token.text)
+            line.words.append(Word(text: token.text, index: index, frame: Rect(x: x, y: y, width: w, height: lineHeight),
+                                   spaceBefore: token.spaceBefore))
             index += 1
-            x += w + spaceWidth
+            x += w
         }
         pages[pages.count - 1].lines.append(line)
     }

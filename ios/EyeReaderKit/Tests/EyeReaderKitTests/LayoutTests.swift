@@ -49,9 +49,7 @@ let hundredWords = (0..<100).map { "w\($0)" }.joined(separator: " ")
     let long = String(repeating: "y", count: 50)  // 500pt > 폭 200pt
     let p = pages("x \(long) z", height: 400)[0]
     for line in p.lines { #expect(line.words.last!.frame.maxX <= 200) }
-    #expect(p.text.replacingOccurrences(of: "\n", with: "") == "x \(long) z".replacingOccurrences(of: " ", with: "")
-            || p.words.map(\.text).joined().contains(long))
-    #expect(p.words.map(\.text).joined() == "x" + long + "z")
+    #expect(p.words.map(\.text).joined() == "x" + long + "z")  // 글자는 하나도 빠지지 않는다
 }
 
 @Test func pageTextAndEmptyText() {
