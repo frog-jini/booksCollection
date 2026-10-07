@@ -13,13 +13,32 @@ public struct Book: Sendable {
 
 public enum BookText {
     /// 줄바꿈으로 잘린 문장은 잇고, 빈 줄로 나뉜 문단은 유지한다.
+    /// - 일본어·중국어 글자끼리 이어 붙일 때는 공백을 넣지 않는다.
+    /// - 전각 공백·「 『 （ 로 시작하는 줄은 새 문단(일본어 소설의 들여쓰기·대사).
     public static func normalize(_ raw: String) -> String {
         var text = raw.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         text = text.replacingOccurrences(of: #"(\w)-\n(\w)"#, with: "$1$2", options: .regularExpression)
-        let paragraphs = text.components(separatedBy: "\n")
-            .split { $0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { $0.joined(separator: " ").split(whereSeparator: \.isWhitespace).joined(separator: " ") }
-        return paragraphs.filter { !$0.isEmpty }.joined(separator: "\n\n")
+        var paragraphs: [String] = []
+        var current = ""
+        func flush() {
+            let p = current.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            if !p.isEmpty { paragraphs.append(p) }
+            current = ""
+        }
+        for rawLine in text.components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty { flush(); continue }
+            if let first = rawLine.first, "\u{3000}「『（".contains(first) { flush() }
+            if current.isEmpty {
+                current = line
+            } else if Script.isCJK(current.last!) && Script.isCJK(line.first!) {
+                current += line
+            } else {
+                current += " " + line
+            }
+        }
+        flush()
+        return paragraphs.joined(separator: "\n\n")
     }
 
     /// 책 파일의 글자 인코딩을 알아내서 읽는다.
