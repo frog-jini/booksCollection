@@ -56,3 +56,53 @@ def test_furthest_word_tracks_progress_not_rereading():
     tr.update(at(p, 0, 1), t=0.2)  # 같은 줄 안에서 되돌아 읽기
     assert tr.word.text == "b0xx"
     assert tr.furthest.text == "d0xx"
+
+
+# --- 6b. 자동 페이지 넘김 (readme 3) --------------------------------------------
+
+def read_last_line_to_end(tr, p):
+    tr.update(at(p, 2, 0), t=0)
+    tr.update(at(p, 2, 0), t=0.2)
+    tr.update(at(p, 2, 3), t=1.0)
+
+
+def test_page_does_not_turn_while_reading():
+    p = page()
+    tr = ReadingTracker(p, line_switch_time=0.1)
+    tr.update(at(p, 0, 0), t=0)
+    tr.update(at(p, 1, 3), t=1)
+    assert not tr.should_turn
+
+
+def test_staying_on_last_word_turns_page():
+    p = page()
+    tr = ReadingTracker(p, line_switch_time=0.1, turn_dwell=0.8)
+    read_last_line_to_end(tr, p)
+    tr.update(at(p, 2, 3), t=1.5)
+    assert not tr.should_turn
+    tr.update(at(p, 2, 3), t=1.9)
+    assert tr.should_turn
+
+
+def test_return_sweep_on_last_line_turns_page():
+    p = page()
+    tr = ReadingTracker(p, line_switch_time=0.1)
+    read_last_line_to_end(tr, p)
+    tr.update(at(p, 0, 0), t=1.1)  # 다음 페이지 첫 줄로 가려는 눈
+    assert tr.should_turn
+
+
+def test_reset_for_new_page_clears_turn_flag():
+    p = page()
+    tr = ReadingTracker(p, line_switch_time=0.1)
+    read_last_line_to_end(tr, p)
+    tr.update(at(p, 0, 0), t=1.1)
+    tr.reset(page())
+    assert not tr.should_turn and tr.word is None
+
+
+def test_empty_page_turns_immediately():
+    empty = paginate("", width=200, height=400, measure=len, line_height=40, space_width=10)[0]
+    tr = ReadingTracker(empty)
+    assert tr.update((0, 0), t=0) is None
+    assert tr.should_turn
