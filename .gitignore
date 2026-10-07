@@ -9,3 +9,4 @@ reports/
 ios/**/.build/
 ios/**/.swiftpm/
 ios/*.xcodeproj/
+README.md
