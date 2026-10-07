@@ -7,6 +7,7 @@ dependencies = [
     "pypdf",
     "ebooklib",
     "beautifulsoup4",
+    "numpy",
 ]
 
 [project.optional-dependencies]
