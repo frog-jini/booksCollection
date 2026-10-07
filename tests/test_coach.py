@@ -70,7 +70,7 @@ def test_report_summarizes_the_reading_session():
     assert r["away_minutes"] == pytest.approx(10 / 60, abs=0.05)
     assert r["look_aways"] == 1
     assert r["alerts"] == {"too_close": 1, "break": 1}
-    assert r["avg_distance_cm"] == pytest.approx((55 * 112 + 30 * 16) / 128, abs=1)
+    assert r["avg_distance_cm"] == pytest.approx((55 * 244 + 30 * 16) / 260, abs=0.5)  # 0.5초마다 1번 측정
     assert len(r["focus_per_minute"]) == 2
     assert r["pages"] == [{"page": 1, "seconds": 3.0, "hottest": [[[25.0, 25.0], 3.0]]}]
 
