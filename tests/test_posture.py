@@ -90,3 +90,93 @@ def test_no_face_gives_none():
     assert head_pose(None) is None
     assert head_pose([(0, 0)] * 10) is None
     assert head_pose([(0.5, 0.5)] * 478) is None  # 눈이 한 점에 겹침
+
+
+# --- 12. 나쁜 자세가 이어지면 알려 주기 ------------------------------------------
+
+from eyereader.posture import HeadPose, PostureMonitor  # noqa: E402
+
+GOOD = HeadPose(distance_cm=55, yaw=0, pitch=0, roll=0)
+
+
+def bad(**kw):
+    return HeadPose(**{**GOOD.__dict__, **kw})
+
+
+def feed(monitor, pose, start, seconds, step=0.5):
+    """seconds 동안 같은 자세를 보내고 나온 알림을 모두 모은다."""
+    alerts, t = [], start
+    while t < start + seconds:
+        alerts += monitor.update(pose, t)
+        t += step
+    return alerts, t
+
+
+def monitor(**kw):
+    m = PostureMonitor(hold=10, cooldown=300, baseline_samples=4, **kw)
+    feed(m, GOOD, 0, 2)  # 처음 2초는 바른 자세 → 숙임 기준값
+    return m
+
+
+def test_good_posture_gives_no_alerts():
+    alerts, _ = feed(monitor(), GOOD, 2, 600)
+    assert alerts == []
+
+
+def test_too_close_is_reported_only_after_it_lasts():
+    m = monitor()
+    alerts, t = feed(m, bad(distance_cm=30), 2, 9)
+    assert alerts == []  # 잠깐 다가간 것은 괜찮다
+    alerts, _ = feed(m, bad(distance_cm=30), t, 2)
+    assert [a.kind for a in alerts] == ["too_close"]
+    assert alerts[0].title == "독서 자세가 좋지 않습니다."
+    assert "화면과 얼굴이 너무 가깝습니다" in alerts[0].message and "30cm" in alerts[0].message
+
+
+def test_same_alert_is_not_repeated_within_cooldown():
+    m = monitor()
+    alerts, t = feed(m, bad(distance_cm=30), 2, 200)
+    assert len(alerts) == 1
+    alerts, _ = feed(m, bad(distance_cm=30), t, 200)  # 5분이 지나면 다시
+    assert len(alerts) == 1
+
+
+def test_short_break_in_bad_posture_restarts_the_clock():
+    m = monitor()
+    _, t = feed(m, bad(distance_cm=30), 2, 8)
+    _, t = feed(m, GOOD, t, 1)
+    alerts, _ = feed(m, bad(distance_cm=30), t, 8)
+    assert alerts == []
+
+
+@pytest.mark.parametrize("pose, kind, words", [
+    (bad(roll=25), "tilted", "기울어져"),
+    (bad(yaw=-35), "turned", "비스듬히"),
+    (bad(pitch=30), "head_down", "숙이고"),
+])
+def test_each_posture_problem_has_its_own_message(pose, kind, words):
+    alerts, _ = feed(monitor(), pose, 2, 12)
+    assert [a.kind for a in alerts] == [kind] and words in alerts[0].message
+
+
+def test_head_down_is_judged_against_the_readers_own_usual_posture():
+    m = PostureMonitor(hold=10, baseline_samples=4)
+    feed(m, bad(pitch=15), 0, 2)  # 이 사람은 원래 15° 정도 숙여서 본다(카메라 위치 탓)
+    alerts, _ = feed(m, bad(pitch=25), 2, 12)
+    assert alerts == []
+    alerts, _ = feed(m, bad(pitch=40), 14, 12)
+    assert [a.kind for a in alerts] == ["head_down"]
+
+
+def test_lost_face_does_not_count_as_bad_posture():
+    m = monitor()
+    _, t = feed(m, bad(distance_cm=30), 2, 8)
+    _, t = feed(m, None, t, 5)
+    alerts, _ = feed(m, bad(distance_cm=30), t, 8)
+    assert alerts == []
+
+
+def test_thresholds_can_be_changed():
+    m = monitor(min_distance=25)
+    alerts, _ = feed(m, bad(distance_cm=30), 2, 12)
+    assert alerts == []
