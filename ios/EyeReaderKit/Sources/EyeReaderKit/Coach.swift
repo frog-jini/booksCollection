@@ -70,7 +70,7 @@ public final class ReadingCoach {
 }
 
 /// 독서 보고서. 집중도·피로도 연구용 데이터로 쓸 수 있게 JSON 으로 저장한다.
-public struct ReadingReport: Codable, Equatable, Sendable {
+public struct ReadingReport: Codable, Equatable, Sendable, Identifiable {
     public struct PageSummary: Codable, Equatable, Sendable {
         public let page: Int
         public let seconds: Double
@@ -89,6 +89,8 @@ public struct ReadingReport: Codable, Equatable, Sendable {
     public let averageDistanceCm: Double?
     public let alerts: [String: Int]
     public let pages: [PageSummary]
+
+    public var id: String { "\(title)-\(readingMinutes)" }
 
     public func jsonData() throws -> Data {
         let encoder = JSONEncoder()

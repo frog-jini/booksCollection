@@ -86,10 +86,6 @@ struct ReaderView: View {
     }
 }
 
-extension ReadingReport: Identifiable {
-    public var id: String { title + String(readingMinutes) }
-}
-
 /// 독서가 끝나면 보여 주는 요약. JSON 보고서는 공유(파일 앱·AirDrop 등)할 수 있다.
 struct ReportView: View {
     let report: ReadingReport
