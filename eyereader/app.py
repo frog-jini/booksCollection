@@ -3,6 +3,7 @@
     python -m eyereader.app 책.pdf            # 웹캠으로 읽기
     python -m eyereader.app 책.epub --mouse   # 웹캠 없이 마우스로 시험
     python -m eyereader.app --search "alice"  # Project Gutenberg 에서 찾아 읽기
+    python -m eyereader.app --monitor         # 다른 앱으로 읽는 동안 자세·휴식·졸음 알림
 """
 
 from __future__ import annotations
@@ -10,15 +11,23 @@ from __future__ import annotations
 import textwrap
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pygame
 
+from .breaks import ReadingTimer
 from .cli import parse_args, resolve_book_path
+from .coach import ReadingCoach
 from .gaze.calibration import Calibrator, calibration_points
+from .heatmap import GazeHeatmap, PageHeatmaps
 from .layout import paginate
 from .llm import LLMClient, LLMError
 from .loader import load_book
+from .monitor import FaceReading, analyze, run_monitor
+from .posture import DEFAULT_HFOV, PostureMonitor
+from .report import save_report as write_report
 from .session import ReadingSession
 
 CACHE_DIR = Path.home() / ".cache" / "eyereader"
@@ -33,8 +42,11 @@ LINE_HL = (255, 243, 190)
 WORD_HL = (255, 196, 80)
 GAZE = (220, 50, 50)
 PANEL = (35, 40, 50)
+HEAT = (230, 60, 40)
+TOAST_BG = (60, 70, 90)
 MARGIN = 80
 STATUS_H = 40
+TOAST_SECONDS = 8
 LLM_HELP = "무료 LLM 사용법: https://ollama.com 설치 후 `ollama pull llama3.2`"
 
 
@@ -49,7 +61,7 @@ def _in_thread(fn):
 class Reader:
     """읽기 화면: ReadingSession 의 상태를 그리고 키 입력을 처리한다."""
 
-    def __init__(self, screen, book, font_size=30, llm=None, background=_in_thread):
+    def __init__(self, screen, book, font_size=30, llm=None, background=_in_thread, coach=None, heat_cell=40):
         self.screen = screen
         self.book = book
         self.font = load_font(font_size)
@@ -69,6 +81,12 @@ class Reader:
         self.background = background
         self.show_gaze = True
         self._panel: str | None = None
+        # 독서 도우미(readme 11): 자세·휴식·졸음·집중도, 페이지별 시선 heatmap
+        self.coach = coach or ReadingCoach()
+        self.heatmaps = PageHeatmaps(w, h, heat_cell)
+        self.show_heatmap = False
+        self._toasts: list[tuple[object, float]] = []  # (알림, 사라질 시각)
+        self._now: float | None = None
 
     @property
     def panel(self) -> str | None:
@@ -99,7 +117,62 @@ class Reader:
             self.ask_llm("explain")
         elif key == pygame.K_g:
             self.show_gaze = not self.show_gaze
+        elif key == pygame.K_h:
+            self.show_heatmap = not self.show_heatmap
         return True
+
+    # --- 독서 도우미 ---------------------------------------------------------
+    def _text_area(self) -> pygame.Rect:
+        w, h = self.screen.get_size()
+        return pygame.Rect(MARGIN, MARGIN, w - 2 * MARGIN, h - 2 * MARGIN - STATUS_H).inflate(40, 40)
+
+    def observe(self, t: float, reading: FaceReading | None):
+        """한 프레임의 얼굴 정보(웹캠)를 독서 도우미에 넘긴다. 마우스 모드면 reading=None."""
+        dt = 0.0 if self._now is None else min(max(t - self._now, 0.0), 0.5)
+        self._now = t
+        gaze = self.session.gaze
+        present = reading.present if reading is not None else gaze is not None
+        if present and gaze is not None:
+            self.heatmaps.add(self.session.page_no, gaze[0], gaze[1], dt)
+        alerts = self.coach.update(
+            t,
+            pose=reading.pose if reading else None,
+            openness=reading.openness if reading else None,
+            present=present,
+            on_target=present and gaze is not None and self._text_area().collidepoint(gaze),
+        )
+        self._toasts += [(a, t + TOAST_SECONDS) for a in alerts]
+        return alerts
+
+    def visible_toasts(self, t: float):
+        return [a for a, until in self._toasts if t < until]
+
+    def status_text(self) -> str:
+        sess, st = self.session, self.coach.status()
+        focus = st["focus"] if st["focus"] is not None else "-"
+        posture = {True: "좋음", False: "확인 필요", None: "-"}[st["posture_ok"]]
+        return (f"{self.book.title}   {sess.page_no + 1}/{len(sess.pages)}   {sess.speed.wpm():.0f} WPM   "
+                f"집중 {focus}   자세 {posture}   독서 {int(st['reading_minutes'])}분   "
+                "←→ 페이지  S 요약  E 설명  H heatmap  C 재보정  G 시선점  ESC 종료")
+
+    def heatmap_image(self, page_no: int) -> pygame.Surface:
+        """보고서용: 그 페이지 글자 위에 heatmap 을 겹친 그림."""
+        img = pygame.Surface(self.screen.get_size())
+        img.fill(BG)
+        for word in self.session.pages[page_no].words:
+            glyph = self.font.render(word.text, True, TEXT)
+            img.blit(glyph, (word.x, word.y + (word.h - glyph.get_height()) / 2))
+        self._draw_heat(img, self.heatmaps[page_no])
+        return img
+
+    def save_report(self, directory, now: datetime | None = None) -> Path:
+        """독서 보고서(JSON)와 페이지별 heatmap 그림(같은 이름의 폴더)을 저장한다."""
+        path = write_report(self.coach.report(self.book.title, self.heatmaps), directory, now)
+        image_dir = path.with_suffix("")
+        image_dir.mkdir(parents=True, exist_ok=True)
+        for page_no in sorted(self.heatmaps.pages):
+            pygame.image.save(self.heatmap_image(page_no), str(image_dir / f"page-{page_no + 1:03d}.png"))
+        return path
 
     def ask_llm(self, kind):
         word = self.session.tracker.word
@@ -136,17 +209,37 @@ class Reader:
             color = READ if word.index < furthest and word is not tr.word else TEXT  # 읽은 곳은 흐리게
             img = self.font.render(word.text, True, color)
             s.blit(img, (word.x, word.y + (word.h - img.get_height()) / 2))
-        self._draw_status()
+        if self.show_heatmap:
+            self._draw_heat(s, self.heatmaps[self.session.page_no])
+        self.screen.blit(self.small.render(self.status_text(), True, READ),
+                         (MARGIN, self.screen.get_height() - STATUS_H))
         if self.show_gaze and self.session.gaze:
             pygame.draw.circle(s, GAZE, [int(v) for v in self.session.gaze], 8, 2)
+        if self._now is not None:
+            self._draw_toasts(self.visible_toasts(self._now))
         if self.panel is not None:
             self._draw_panel(self.panel)
 
-    def _draw_status(self):
-        sess = self.session
-        status = (f"{self.book.title}   {sess.page_no + 1}/{len(sess.pages)}   {sess.speed.wpm():.0f} WPM   "
-                  "←→ 페이지  S 요약  E 단어 설명  C 재보정  G 시선점  ESC 종료")
-        self.screen.blit(self.small.render(status, True, READ), (MARGIN, self.screen.get_height() - STATUS_H))
+    def _draw_heat(self, surface, heatmap: GazeHeatmap):
+        layer = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        c = heatmap.cell
+        for (row, col), value in np.ndenumerate(heatmap.normalized()):
+            if value > 0:
+                layer.fill((*HEAT, int(40 + 150 * value)), (col * c, row * c, c, c))
+        surface.blit(layer, (0, 0))
+
+    def _draw_toasts(self, alerts):
+        y = 16
+        for alert in alerts[-3:]:
+            lines = [alert.title, alert.message]
+            width = max(self.small.size(l)[0] for l in lines) + 40
+            rect = pygame.Rect((self.screen.get_width() - width) // 2, y, width,
+                               len(lines) * self.small.get_linesize() + 20)
+            pygame.draw.rect(self.screen, TOAST_BG, rect, border_radius=10)
+            for i, line in enumerate(lines):
+                self.screen.blit(self.small.render(line, True, (255, 255, 255)),
+                                 (rect.x + 20, rect.y + 10 + i * self.small.get_linesize()))
+            y = rect.bottom + 8
 
     def _draw_panel(self, text):
         sw, sh = self.screen.get_size()
@@ -204,11 +297,12 @@ def calibrate(screen, source, font) -> Calibrator | None:
     return cal
 
 
-def run(book, source, size=None, font_size=30, reuse_calibration=False, max_frames=None):
+def run(book, source, size=None, font_size=30, reuse_calibration=False, max_frames=None,
+        coach=None, hfov_deg=DEFAULT_HFOV, reports_dir="reports"):
     pygame.init()
     screen = pygame.display.set_mode(size or (0, 0), 0 if size else pygame.FULLSCREEN)
     pygame.display.set_caption(f"EyeReader - {book.title}")
-    reader = Reader(screen, book, font_size=font_size)
+    reader = Reader(screen, book, font_size=font_size, coach=coach)
 
     cal = None
     if source.needs_calibration:
@@ -221,10 +315,11 @@ def run(book, source, size=None, font_size=30, reuse_calibration=False, max_fram
                 return
 
     def read_gaze():
+        """(시선 좌표, 얼굴 정보). 마우스 모드는 얼굴 정보가 없다."""
         if not source.needs_calibration:
-            return source.read_point()
-        feature = source.read_feature()
-        return cal.predict(feature) if feature is not None else None
+            return source.read_point(), None
+        reading = analyze(source.read_frame(), hfov_deg)
+        return (cal.predict(reading.feature) if reading.feature is not None else None), reading
 
     clock = pygame.time.Clock()
     running, frames = True, 0
@@ -237,22 +332,38 @@ def run(book, source, size=None, font_size=30, reuse_calibration=False, max_fram
                     cal = calibrate(screen, source, reader.font) or cal
                 else:
                     running = reader.handle_key(e.key)
-        reader.session.step(read_gaze(), time.monotonic())
+        gaze, reading = read_gaze()
+        now = time.monotonic()
+        reader.session.step(gaze, now)
+        reader.observe(now, reading)
         reader.draw()
         pygame.display.flip()
         clock.tick(30)
         frames += 1
     source.close()
+    path = reader.save_report(reports_dir)
     pygame.quit()
+    print(f"독서 보고서: {path}  (페이지별 heatmap: {path.with_suffix('')}/)")
+
+
+def build_coach(args) -> ReadingCoach:
+    return ReadingCoach(posture=PostureMonitor(min_distance=args.min_distance),
+                        timer=ReadingTimer(break_after=args.break_minutes * 60))
 
 
 def main(argv=None):
     from .gaze.sources import MouseSource, WebcamSource
 
     args = parse_args(argv)
+    if args.monitor:
+        print("감시 모드: 다른 앱으로 읽는 동안 자세·휴식·졸음을 알려 드립니다. 끝내려면 Ctrl+C")
+        report = run_monitor(WebcamSource(args.camera), build_coach(args), hfov_deg=args.camera_fov)
+        print(f"독서 보고서: {write_report(report, args.reports_dir)}")
+        return
     book = load_book(resolve_book_path(args))
     source = MouseSource() if args.mouse else WebcamSource(args.camera)
-    run(book, source, size=args.window, font_size=args.font_size, reuse_calibration=args.reuse_calibration)
+    run(book, source, size=args.window, font_size=args.font_size, reuse_calibration=args.reuse_calibration,
+        coach=build_coach(args), hfov_deg=args.camera_fov, reports_dir=args.reports_dir)
 
 
 if __name__ == "__main__":
