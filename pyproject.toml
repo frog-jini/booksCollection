@@ -9,10 +9,16 @@ dependencies = [
     "beautifulsoup4",
     "numpy",
     "requests",
+    "opencv-python",
+    "mediapipe",
+    "pygame",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+[project.scripts]
+eyereader = "eyereader.app:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
