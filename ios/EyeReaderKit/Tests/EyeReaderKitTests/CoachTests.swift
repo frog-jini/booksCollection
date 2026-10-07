@@ -94,3 +94,9 @@ func testCoach() -> ReadingCoach {
     let date = cal.date(from: DateComponents(year: 2026, month: 10, day: 7, hour: 14, minute: 5))!
     #expect(ReadingReport.fileName(title: "앨리스: 1/2", date: date, calendar: cal) == "앨리스_1_2-20261007-1405.json")
 }
+
+@Test func reportCanBeShownInListsBecauseItIsIdentifiable() {
+    let r = testCoach().report(title: "앨리스")
+    let ids: [String] = [r].map(\.id)
+    #expect(ids == [r.id] && r.id.hasPrefix("앨리스"))
+}
