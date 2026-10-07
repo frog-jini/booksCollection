@@ -1,5 +1,5 @@
 /// 화면 좌표(pt). CoreGraphics 없이도 테스트할 수 있게 직접 정의한다.
-public struct Point: Equatable, Hashable, Sendable {
+public struct Point: Equatable, Hashable, Sendable, Codable {
     public var x: Double
     public var y: Double
     public init(x: Double, y: Double) { self.x = x; self.y = y }
