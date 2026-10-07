@@ -2,6 +2,7 @@
 
 - 검색: Gutendex (https://gutendex.com) — Gutenberg 카탈로그용 무료 JSON API, 키 불필요.
   자주 503 이 나므로 실패하면 gutenberg.org 공식 OPDS 검색으로 대신한다.
+- 다운로드: gutenberg.org 공식 미러의 plain text (pg{id}.txt) 를 받아 파일로 저장한다.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import requests
 
@@ -16,6 +18,10 @@ SEARCH_URL = "https://gutendex.com/books"
 OPDS_SEARCH_URL = "https://www.gutenberg.org/ebooks/search.opds/"
 _ATOM = "{http://www.w3.org/2005/Atom}"
 _BOOK_ID = re.compile(r"/ebooks/(\d+)\.opds$")
+TEXT_URL = "https://www.gutenberg.org/cache/epub/{id}/pg{id}.txt"
+
+_START = re.compile(r"^\*\*\* ?START OF (THE|THIS) PROJECT GUTENBERG.*$", re.M | re.I)
+_END = re.compile(r"^\*\*\* ?END OF (THE|THIS) PROJECT GUTENBERG.*$", re.M | re.I)
 
 
 class GutenbergError(RuntimeError):
@@ -32,6 +38,16 @@ class BookInfo:
     def __str__(self):
         who = "; ".join(self.authors) or "작자 미상"
         return f"[{self.id}] {self.title} — {who} ({','.join(self.languages)})"
+
+
+def strip_boilerplate(text: str) -> str:
+    """Gutenberg 라이선스 머리말/꼬리말을 떼어낸다. 표시가 없으면 그대로 둔다."""
+    start, end = _START.search(text), _END.search(text)
+    if not (start or end):
+        return text
+    begin = start.end() if start else 0
+    finish = end.start() if end and (not start or end.start() > start.end()) else len(text)
+    return text[begin:finish].strip("\r\n")
 
 
 class GutenbergClient:
@@ -90,3 +106,14 @@ class GutenbergClient:
                 authors=[author] if author else [],
             ))
         return books
+
+    def download(self, book_id: int, dest_dir) -> Path:
+        """책을 dest_dir/pg{id}.txt 로 저장하고 경로를 돌려준다. 이미 있으면 다시 받지 않는다."""
+        dest_dir = Path(dest_dir)
+        path = dest_dir / f"pg{book_id}.txt"
+        if path.exists():
+            return path
+        raw = self._get(TEXT_URL.format(id=book_id)).content.decode("utf-8", errors="replace")
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(strip_boilerplate(raw) + "\n", encoding="utf-8")
+        return path

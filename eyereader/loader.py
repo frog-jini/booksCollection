@@ -13,6 +13,8 @@ from pathlib import Path
 
 from bs4 import BeautifulSoup
 
+from .gutenberg import strip_boilerplate
+
 
 class UnsupportedFormatError(ValueError):
     pass
@@ -111,7 +113,7 @@ def _load_textual(path: Path):
         return _html_to_text(text)
     if suffix in (".md", ".markdown"):
         return None, _strip_markdown(text)
-    return None, text
+    return None, strip_boilerplate(text)  # 직접 받은 Gutenberg 파일의 라이선스 문구
 
 
 _LOADERS = {".pdf": _load_pdf, ".epub": _load_epub, ".docx": _load_docx}
